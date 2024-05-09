@@ -1,12 +1,11 @@
 from enum import Enum
-from time import sleep
-import serial
 import webbrowser
 import numpy as np
 import dearpygui.dearpygui as dpg
 from dpg_themes import create_theme_imgui_light
 import pyperclip
 from matplotlib import pyplot as plt
+
 
 class OscilloscopeChannel(Enum):
     CH1 = "CH1"
@@ -24,47 +23,32 @@ class CurveType(Enum):
     TrueVoltage = "TRUE_VOLTAGE"
 
 def OscilloscopeSendCommand(ser, message):
-    ser.write(f"{message}\n".encode())
+    with open(usbtmc_port, "r+") as ser:
+        ser.write(f"{message}\n")
+        ser.flush()
     gui_add_to_log(f"-> {message}\n")
     
-    #sleep(0.2)
     
-def OscilloscopeReadResponse(ser, debug=0):
-    #debug = 0
-    if(debug == 0):
+def OscilloscopeSendCommandAndRead(ser, message):
+    with open(usbtmc_port, "r+") as ser:
+        ser.write(f"{message}\n")
+        ser.flush()
         res = ser.readline()
-    
-    if (debug == 1):
-        res = "TEK/TDS340,CF:91.1CT,FV:v1.00"
-    if (debug == 2):
-        res = f"{np.random.random() * 50}E3"
-    if (debug == 3):
-        res = "V"
-    if (debug == 4):
-        x = np.arange(0, 2500, 1)
-        y = np.sin(x * 1/500 + np.random.random() * 100) * (np.random.random() * 1000 + 2000)
-        res = ",".join([str(int(a)) for a in y])
-    if (debug == 5):
-        res = "Ch1, DC coupling, 1.0E0 V/div, 5.0E-4 s/div, 2500 points, Sample mode"
-    if (debug == 6):
-        res = "2225, \"MEASUREMENT ERROR, NO WAVEFORM TO MEASURE; \",420,\"QUERY UNTERMINATED; \""
-    
-    
+        
+        
+    gui_add_to_log(f"-> {message}\n")
     gui_add_to_log(f"<- {res}\n")
     
     return res
 
 
-
 def OscilloscopeId(ser):
-    OscilloscopeSendCommand(ser, f"ID?")
-    id = OscilloscopeReadResponse(ser, 1)
+    id = OscilloscopeSendCommandAndRead(ser, f"ID?")
     
     return id
 
 def OscilloscopeAlle(ser):
-    OscilloscopeSendCommand(ser, f"ALLE?")
-    alle = OscilloscopeReadResponse(ser, 6)
+    alle = OscilloscopeSendCommandAndRead(ser, f"ALLE?")
     
     return alle
 
@@ -73,12 +57,10 @@ def OscilloscopeImmediateMeasure(ser, channel: OscilloscopeChannel, type: Oscill
     OscilloscopeSendCommand(ser, f"MEASU:IMM:SOU {channel.value}")
     OscilloscopeSendCommand(ser, f"MEASU:IMM:TYPE {type.value}")
     
-    OscilloscopeSendCommand(ser, f"MEASU:IMM:VAL?")
-    value = float(OscilloscopeReadResponse(ser, 2))
+    value = OscilloscopeSendCommandAndRead(ser, f"MEASU:IMM:VAL?")
     
-    OscilloscopeSendCommand(ser, f"MEASU:IMM:UNI?")
-    unit_str = OscilloscopeReadResponse(ser, 3)
-    
+    unit_str = OscilloscopeSendCommandAndRead(ser, f"MEASU:IMM:UNI?")
+     
     return (value, unit_str)
 
 def OscilloscopeCurve(ser, channel: OscilloscopeChannel):
@@ -89,11 +71,9 @@ def OscilloscopeCurve(ser, channel: OscilloscopeChannel):
     OscilloscopeSendCommand(ser, f"DAT:STOP 2500")
     OscilloscopeSendCommand(ser, f"DAT:WID 2")
     
-    OscilloscopeSendCommand(ser, f"CURV?")
-    curve_str = OscilloscopeReadResponse(ser, 4)
+    curve_str = OscilloscopeSendCommandAndRead(ser, f"CURV?")
     
-    OscilloscopeSendCommand(ser, f"WFMP:WFI?")
-    info_str = OscilloscopeReadResponse(ser, 5)
+    info_str = OscilloscopeSendCommandAndRead(ser, f"WFMP:WFI?")
     
     xaxis_info = info_str.split(", ")[3]
     yaxis_info = info_str.split(", ")[2]
@@ -110,40 +90,29 @@ def OscilloscopeCurve(ser, channel: OscilloscopeChannel):
 
 
 ser = None
+usbtmc_port = None
 
 def gui_rs232_connect():
     global ser
+    global usbtmc_port
     
-    serial_port = dpg.get_value("serial_port_input")
-    baudrate = int(dpg.get_value("baudrate_input"))
+    usbtmc_port = dpg.get_value("usbtmc_file_input")
     
-    ser = serial.Serial(serial_port, baudrate)
-    
-    ser.rtscts = False
-    ser.dsrdtr = False
-    ser.xonxoff = False
-    ser.dtr = True
-    ser.rts = True
-    
-    ser.close()
-    ser.open()
-    
-    
-    dpg.configure_item("serial_port_window", show=False)
-    dpg.configure_item("serial_log_window", show=True)
+    dpg.configure_item("usbtmc_file_window", show=False)
+    dpg.configure_item("communication_log_window", show=True)
     dpg.configure_item("oscilloscope_commands_window", show=True)
     
     OscilloscopeId(ser)
     
 
-serial_log_str = ""
+communication_log_str = ""
 
 def gui_add_to_log(message):
-    global serial_log_str
-    serial_log_str = serial_log_str + message
+    global communication_log_str
+    communication_log_str = communication_log_str + message
     
-    dpg.set_value("serial_log_text", serial_log_str)
-    dpg.set_item_height("serial_log_text", dpg.get_text_size(serial_log_str)[1] + (2 * 3))
+    dpg.set_value("communication_log_text", communication_log_str)
+    dpg.set_item_height("communication_log_text", dpg.get_text_size(communication_log_str)[1] + (2 * 3))
     
     
 def gui_immediate_measurement(mw_index):
@@ -237,10 +206,8 @@ width, height, channels, data = dpg.load_image("oscilloscope.jpg")
 with dpg.texture_registry(show=False):
     dpg.add_static_texture(width=width, height=height, default_value=data, tag="bg_texture")
 
-with dpg.window(label="Serial Port Configuration", tag="serial_port_window", width=430, height=400, no_resize=True, no_close=True):
-    dpg.add_text("Connect to oscilloscope serial port")
-    dpg.add_input_text(label="Serial Port", tag="serial_port_input")
-    dpg.add_input_text(label="Baudrate", tag="baudrate_input")
+with dpg.window(label="USBTMC Configuration", tag="usbtmc_file_window", width=430, height=400, no_resize=True, no_close=True):
+    dpg.add_input_text(label="USBTMC file", tag="usbtmc_file_input")
     
     with dpg.group(horizontal=True):
         dpg.add_button(label="Connect", callback=gui_rs232_connect)
@@ -331,14 +298,14 @@ def CreateCurveWindow():
     
             
 
-with dpg.window(label="Serial log", show=False, tag="serial_log_window", no_close=True, min_size=(400, 240)):
+with dpg.window(label="Communication log", show=False, tag="communication_log_window", no_close=True, min_size=(400, 240)):
     def toggle_auto_scroll(checkbox, checked):
-        dpg.configure_item("serial_log_text", tracked=checked)
+        dpg.configure_item("communication_log_text", tracked=checked)
     
     dpg.add_checkbox(label="Autoscroll", default_value=True, callback=toggle_auto_scroll)
     
     with dpg.child_window():
-        dpg.add_input_text(tag="serial_log_text", multiline=True, readonly=True, tracked=True, track_offset=1, width=-1, height=0)
+        dpg.add_input_text(tag="communication_log_text", multiline=True, readonly=True, tracked=True, track_offset=1, width=-1, height=0)
     
 with dpg.window(label="About", no_close=True, no_resize=True, pos=(0, 400)):
     dpg.add_text("Developed by Achille Merendino in 2024")
@@ -346,9 +313,8 @@ with dpg.window(label="About", no_close=True, no_resize=True, pos=(0, 400)):
     
     dpg.add_separator()
     
-    dpg.add_text("Based on the following datasheet")
-    dpg.add_button(label="Open datasheet", callback=lambda: webbrowser.open("https://achilleme.com/static/tek232/datasheet.pdf"))
-    dpg.add_button(label="Visit Tekwiki", callback=lambda: webbrowser.open("https://w140.com/tekwiki/wiki/TDS1001"))
+    dpg.add_text("Based on the following documents")
+    dpg.add_button(label="TEK232 Documents", callback=lambda: webbrowser.open("https://achilleme.com/tek232"))
     
 
 dpg.show_viewport()
